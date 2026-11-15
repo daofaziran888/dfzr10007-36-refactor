@@ -11,7 +11,9 @@ const columns = [
   "扫描行数",
   "返回行数",
   "执行时间",
-  "复核状态"
+  "复核状态",
+  "复核事件号",
+  "操作时间"
 ]
 const actions = [
   "标记复核",
@@ -43,8 +45,18 @@ export default function AuditView() {
   const [rows, setRows] = useState<Row[]>([])
   const [total, setTotal] = useState(0)
   const [errorMessage, setErrorMessage] = useState('')
+  const [message, setMessage] = useState('')
   const [filters, setFilters] = useState<Record<string, string>>({})
   const filterFields = useMemo(() => columns.slice(0, 3), [])
+  const statValues = useMemo(() => {
+    const reviewed = rows.filter((row) => row['复核状态'] === '已复核').length
+    const archived = rows.filter((row) => row['复核状态'] === '已归档').length
+    return [total, reviewed, archived]
+  }, [rows, total])
+  const statCards = useMemo(
+    () => stats.map((item, index) => ({ ...item, value: statValues[index] })),
+    [statValues],
+  )
 
   const reload = useCallback(async () => {
     setErrorMessage('')
@@ -68,14 +80,18 @@ export default function AuditView() {
 
   async function runAction(action: string, row: Row) {
     setErrorMessage('')
+    setMessage('')
     try {
+      // 带上当前版本号：若另一批次已先写入，后端会拒绝本次写入而不是覆盖对方。
       const response = await request(`${ENDPOINT}/${row.id}/actions`, {
         method: 'POST',
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ values: { action, 版本号: row['版本号'] } }),
       })
       if (!response.ok) {
         throw new Error('查询审计日志动作未生效，请稍后重试')
       }
+      const payload = await response.json()
+      setMessage(payload.message ?? '')
       await reload()
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '查询审计日志操作失败')
@@ -100,7 +116,7 @@ export default function AuditView() {
       </header>
 
       <div className="stat-row">
-        {stats.map((item) => (
+        {statCards.map((item) => (
           <article key={item.label} className="stat-card">
             <span className="stat-label">{item.label}</span>
             <strong className="stat-value">{item.value}</strong>
@@ -153,6 +169,7 @@ export default function AuditView() {
 
       <footer className="page-foot">
         <span>共 {total} 条查询审计日志记录</span>
+        {message && <span>{message}</span>}
         {errorMessage && <span className="error-text">{errorMessage}</span>}
       </footer>
     </section>

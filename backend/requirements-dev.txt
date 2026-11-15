@@ -1,0 +1,3 @@
+# 测试依赖：TestClient 需要 httpx（运行 backend/tests 下的回归用例）
+-r requirements.txt
+httpx>=0.27

@@ -4,15 +4,36 @@
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from app.seed import SEED_ROWS
 
 
 class Store:
     def __init__(self) -> None:
+        # 内部账本：复核事件流与导出快照不属于业务模块，不进入 /api/overview 的模块统计。
+        self._internal: dict[str, list[dict[str, Any]]] = {
+            "audit_review_events": [],
+            "audit_export_snapshots": [],
+        }
+        # 模块可以注册一个只读视图函数，让概览与列表使用同一状态口径。
+        self._row_viewers: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {}
+        self.reset()
+
+    def register_viewer(
+        self, module: str, viewer: Callable[[dict[str, Any]], dict[str, Any]]
+    ) -> None:
+        """注册某模块的行视图；概览统计据此读取与其他接口一致的状态。"""
+        self._row_viewers[module] = viewer
+
+    def reset(self) -> None:
+        """按种子数据重建业务表与内部账本，供测试和演示回到初始状态。"""
         self._tables: dict[str, list[dict[str, Any]]] = {
             name: [dict(row) for row in rows] for name, rows in SEED_ROWS.items()
+        }
+        self._internal = {
+            "audit_review_events": [],
+            "audit_export_snapshots": [],
         }
 
     def module_names(self) -> list[str]:
@@ -20,6 +41,10 @@ class Store:
 
     def rows(self, module: str) -> list[dict[str, Any]]:
         return self._tables.setdefault(module, [])
+
+    def internal_rows(self, name: str) -> list[dict[str, Any]]:
+        """返回复核事件流、导出快照等内部账本；与业务模块表隔离。"""
+        return self._internal.setdefault(name, [])
 
     def find(self, module: str, entry_id: int) -> dict[str, Any] | None:
         for row in self.rows(module):
@@ -31,11 +56,13 @@ class Store:
         modules: list[dict[str, object]] = []
         for name in self.module_names():
             rows = self.rows(name)
+            viewer = self._row_viewers.get(name)
+            views = [viewer(row) for row in rows] if viewer is not None else rows
             modules.append({
                 "name": name,
-                "created": len(rows),
-                "pending": sum(1 for row in rows if row.get("pending")),
-                "abnormal": sum(1 for row in rows if row.get("abnormal")),
+                "created": len(views),
+                "pending": sum(1 for row in views if row.get("pending")),
+                "abnormal": sum(1 for row in views if row.get("abnormal")),
             })
         cards = [
             {"label": "业务模块", "value": len(modules)},
